@@ -1233,6 +1233,23 @@
     let ws, reconnectTimer;
     let reconnectAttempts = 0;
     const MAX_RECONNECT = 3;
+    let customServerURL = localStorage.getItem('scannerServerURL') || '';
+
+    function connectTo(url) {
+        if (ws && ws.readyState <= 1) { try { ws.close(); } catch(e){} }
+        reconnectAttempts = 0;
+        const proto = url.startsWith('https') || url.startsWith('wss') ? 'wss:' : 'ws:';
+        const host = url.replace(/^(https?|wss?):\/\//, '').replace(/\/$/, '');
+        try {
+            ws = new WebSocket(`${proto}//${host}`);
+        } catch (e) {
+            enterStandaloneMode();
+            return;
+        }
+        $('status').className = '';
+        $('status-text').textContent = 'Connecting...';
+        attachWSHandlers();
+    }
 
     function connect() {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1242,10 +1259,17 @@
             enterStandaloneMode();
             return;
         }
+        attachWSHandlers();
+    }
+
+    function attachWSHandlers() {
         ws.onopen = () => {
             reconnectAttempts = 0;
             $('status').className = 'connected';
             $('status-text').textContent = 'Scanning...';
+            // Hide standalone prompt if visible
+            const prompt = document.getElementById('standalone-prompt');
+            if (prompt) prompt.style.display = 'none';
         };
         ws.onmessage = (e) => {
             try {
@@ -1268,7 +1292,10 @@
             if (reconnectAttempts <= MAX_RECONNECT) {
                 $('status-text').textContent = `Reconnecting (${reconnectAttempts}/${MAX_RECONNECT})...`;
                 clearTimeout(reconnectTimer);
-                reconnectTimer = setTimeout(connect, 3000);
+                reconnectTimer = setTimeout(() => {
+                    if (customServerURL) connectTo(customServerURL);
+                    else connect();
+                }, 3000);
             } else {
                 enterStandaloneMode();
             }
@@ -1284,18 +1311,76 @@
         const banner = $('location-banner');
         if (banner) banner.style.display = 'none';
         $('ap-list').innerHTML = `
-            <div style="padding:24px 16px;text-align:center;color:#6b7280;">
-                <div style="font-size:0.85rem;font-weight:600;color:#f59e0b;margin-bottom:8px;">
-                    Standalone Mode
+            <div id="standalone-prompt" style="padding:20px 16px;text-align:center;color:#6b7280;">
+                <div style="font-size:1.4rem;margin-bottom:6px;">&#x1F4F6;</div>
+                <div style="font-size:0.85rem;font-weight:700;color:#e5e7eb;margin-bottom:4px;">
+                    Wi-Fi Scanning Unavailable
                 </div>
-                <div style="font-size:0.72rem;line-height:1.7;">
-                    No local Wi-Fi scanner connected.<br>
-                    Using browser GPS only.<br><br>
-                    To enable Wi-Fi scanning, run locally:<br>
-                    <code style="background:#1e2433;padding:3px 10px;border-radius:4px;font-size:0.7rem;">npm start</code>
+                <div style="font-size:0.68rem;line-height:1.7;margin-bottom:14px;color:#9ca3af;">
+                    Browsers cannot scan Wi-Fi networks directly.<br>
+                    A local server on macOS is required to detect<br>
+                    nearby access points for triangulation.
+                </div>
+
+                <div style="text-align:left;background:#111827;border:1px solid #1e2433;border-radius:10px;padding:14px;margin-bottom:12px;">
+                    <div style="font-size:0.7rem;font-weight:700;color:#3b82f6;margin-bottom:8px;">
+                        Option 1: Run Locally
+                    </div>
+                    <div style="font-size:0.65rem;line-height:1.8;color:#9ca3af;">
+                        1. Clone the repo and <code style="background:#1e2433;padding:1px 6px;border-radius:3px;">npm install</code><br>
+                        2. Compile the scanner (see README)<br>
+                        3. Run <code style="background:#1e2433;padding:1px 6px;border-radius:3px;">npm start</code><br>
+                        4. Open <code style="background:#1e2433;padding:1px 6px;border-radius:3px;">http://localhost:3000</code>
+                    </div>
+                </div>
+
+                <div style="text-align:left;background:#111827;border:1px solid #1e2433;border-radius:10px;padding:14px;margin-bottom:14px;">
+                    <div style="font-size:0.7rem;font-weight:700;color:#22c55e;margin-bottom:8px;">
+                        Option 2: Connect to a Running Server
+                    </div>
+                    <div style="font-size:0.65rem;color:#9ca3af;margin-bottom:8px;">
+                        If someone on your network is running the scanner server, enter their address:
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                        <input id="server-url-input" type="text" placeholder="e.g. 192.168.1.50:3443"
+                            value="${customServerURL}"
+                            style="flex:1;background:#0a0e1a;border:1px solid #1e2433;border-radius:6px;padding:7px 10px;
+                            color:#e5e7eb;font-size:0.7rem;font-family:monospace;outline:none;"
+                            onfocus="this.style.borderColor='#3b82f6'"
+                            onblur="this.style.borderColor='#1e2433'">
+                        <button id="server-connect-btn"
+                            style="background:#22c55e;color:#000;border:none;border-radius:6px;padding:7px 14px;
+                            font-size:0.68rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+                            Connect
+                        </button>
+                    </div>
+                </div>
+
+                <div style="font-size:0.62rem;color:#4b5563;line-height:1.6;">
+                    GPS positioning is active and working.<br>
+                    Set a GPS anchor below to see your coordinates.
                 </div>
             </div>
         `;
+
+        // Connect button handler
+        const connectBtn = document.getElementById('server-connect-btn');
+        const urlInput = document.getElementById('server-url-input');
+        if (connectBtn && urlInput) {
+            connectBtn.addEventListener('click', () => {
+                let url = urlInput.value.trim();
+                if (!url) return;
+                if (!url.includes('://')) url = 'https://' + url;
+                customServerURL = url;
+                localStorage.setItem('scannerServerURL', url);
+                connectBtn.textContent = 'Connecting...';
+                connectBtn.style.background = '#f59e0b';
+                connectTo(url);
+            });
+            urlInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') connectBtn.click();
+            });
+        }
     }
 
     // ── GPS Anchor System ──

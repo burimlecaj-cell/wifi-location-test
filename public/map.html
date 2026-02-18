@@ -196,6 +196,21 @@
     let showTrail = false;
     let positions = [];
 
+    // ── Check URL params for initial map center ──
+    const params = new URLSearchParams(window.location.search);
+    const urlLat = parseFloat(params.get('lat'));
+    const urlLng = parseFloat(params.get('lng'));
+    if (!isNaN(urlLat) && !isNaN(urlLng)) {
+        map.setView([urlLat, urlLng], 17);
+        L.marker([urlLat, urlLng], {
+            icon: L.divIcon({
+                className: '',
+                html: '<div style="width:12px;height:12px;background:#f59e0b;border:2px solid #fff;border-radius:50%;"></div>',
+                iconSize: [12, 12], iconAnchor: [6, 6],
+            }),
+        }).addTo(map).bindPopup('Pre-set location');
+    }
+
     // ── Controls ──
     $('btn-follow').addEventListener('click', () => {
         following = !following;

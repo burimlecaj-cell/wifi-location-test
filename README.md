@@ -10,17 +10,17 @@ A real-time indoor/urban positioning system that estimates location using Wi-Fi 
 
 ### The Problem
 
-GPS relies on line-of-sight to satellites. In urban canyons (tall buildings), indoors, or underground, GPS accuracy degrades from ~3m to 50-100m+ or fails entirely. Phones often fall back to Wi-Fi-based positioning (using known AP databases), but that's a black box controlled by Google/Apple.
+GPS relies on line-of-sight to satellites. In urban canyons (tall buildings), indoors, or underground, GPS accuracy degrades from ~3m to 50-100m+ or fails entirely. Devices often fall back to Wi-Fi-based positioning (using known AP databases), but that's a black box controlled by Google/Apple.
 
 ### Our Approach
 
-This project takes a different approach — it scans nearby Wi-Fi access points directly and uses signal physics to estimate position:
+This project scans nearby Wi-Fi access points directly and uses signal physics to estimate position:
 
 1. **RSSI-to-Distance Conversion** — Each Wi-Fi AP broadcasts at a known power level. Signal strength decays with distance following the log-distance path loss model: `d = 10^((TxPower - RSSI) / (10 * n))`. We use frequency-aware path loss exponents (2.4GHz: n=2.8, 5GHz: n=3.2, 6GHz: n=3.5) since higher frequencies attenuate faster.
 
 2. **Trilateration** — With 3+ distance estimates from different APs, we solve for position using Weighted Nonlinear Least Squares (WNLS) with momentum-based gradient descent. Each AP is weighted by its signal-to-noise ratio (SNR) — stronger, cleaner signals get more influence.
 
-3. **RTT Measurement** — We measure round-trip time to the gateway router using TCP SYN timing (nanosecond precision) and ICMP ping. While network-layer RTT includes processing overhead that makes pure distance calculation impractical (~3ms = ~450km at light speed), the relative timing and jitter provide useful signal quality metrics.
+3. **RTT Measurement** — Round-trip time to the gateway router is measured using TCP SYN timing (nanosecond precision) and ICMP ping. While network-layer RTT includes processing overhead that makes pure distance calculation impractical (~3ms = ~450km at light speed), the relative timing and jitter provide useful signal quality metrics.
 
 4. **Kalman Filtering** — Position estimates are smoothed over time using a 1D Kalman filter per axis, reducing jitter from noisy RSSI readings.
 
@@ -35,41 +35,40 @@ This project takes a different approach — it scans nearby Wi-Fi access points 
 
 ---
 
-## Will This Work at Different Locations?
+## Deployment Modes
 
-**Short answer: Yes**, with some caveats depending on which mode you're using.
+### Static (Vercel)
 
-### Vercel-Hosted Version (GPS Only Mode)
+The live demo loads pre-captured Wi-Fi scan data from `scan-data.json` and uses browser GPS. No backend server required. This mode works **anywhere in the world** on any device with a browser.
 
-Works **anywhere in the world** on any device with a browser and GPS/location services. The live demo at [wifi-location-test.vercel.app](https://wifi-location-test.vercel.app) runs entirely in the browser using the Geolocation API. No server needed. Both the triangulation page and the live map page will show your GPS position. The Wi-Fi scanning features are disabled in this mode (the page shows "Standalone Mode").
+The scan data includes 11 APs across 2.4GHz, 5GHz, and 6GHz bands captured at the reference location. The GPS anchor is automatically set from the saved coordinates.
 
-### Local Server Version (Full Wi-Fi Scanning)
+### Local Server (Full Wi-Fi Scanning)
 
-Works **on any macOS machine** at any location. The Wi-Fi scanner uses Apple's CoreWLAN framework to detect nearby access points. What changes by location:
+For real-time scanning, run the Node.js server on macOS. This mode:
+- Scans nearby APs every 3 seconds via CoreWLAN
+- Measures gateway RTT with TCP SYN timing and ICMP ping
+- Streams data to the browser via WebSocket
+- Works at **any location** — the scanner discovers whatever APs are nearby
 
-- **Different APs** — Every location has different Wi-Fi networks. The scanner discovers whatever APs are nearby and builds the trilateration from those. No pre-configured AP database needed.
-- **Accuracy varies** — More visible APs = better triangulation. A coffee shop with 15 visible networks will give better results than a rural house with 2.
-- **Path loss model is universal** — The frequency-aware RSSI-to-distance conversion works everywhere, though walls, furniture, and building materials affect the path loss exponent. The defaults are tuned for typical indoor/urban environments.
-- **GPS anchor is location-independent** — It uses whatever GPS fix the browser provides at your current location.
-
-### Platform Limitations
+### Platform Support
 
 | Platform | Wi-Fi Scanning | GPS | Live Map |
 |----------|---------------|-----|----------|
 | macOS (local server) | Full | Yes | Yes |
-| Windows/Linux (local server) | No (CoreWLAN is macOS-only) | Yes | Yes |
-| Any browser via Vercel | No (requires local server) | Yes | Yes |
-| Mobile phone (same network) | No (server-side) | Yes (better than desktop) | Yes |
+| Windows/Linux | No (CoreWLAN is macOS-only) | Yes | Yes |
+| Any browser (Vercel) | Saved data only | Yes | Yes |
+| Mobile browser | Saved data only | Yes | Yes |
 
-> **Note:** macOS requires Location Services permission for the scanner app to read SSID/BSSID data. Additionally, full SSID visibility requires an Apple Developer certificate ($99/year). Without it, SSIDs appear redacted but the scanner still detects APs by channel and band.
+> **Note:** macOS requires Location Services permission for the scanner app to read SSID/BSSID data. Full SSID visibility requires an Apple Developer certificate ($99/year). Without it, SSIDs appear redacted but the scanner still detects APs by channel and band.
 
 ---
 
-## Setup
+## Local Development Setup
 
 ### Prerequisites
 
-- **macOS** (required for Wi-Fi scanning; GPS-only mode works on any OS)
+- **macOS** (required for Wi-Fi scanning; saved data mode works on any OS)
 - **Node.js 18+**
 - **Xcode Command Line Tools** (for compiling the Swift scanner)
 
@@ -84,10 +83,8 @@ npm install
 ### Compile the Wi-Fi Scanner (macOS only)
 
 ```bash
-# Create the app bundle structure
 mkdir -p WifiScanner.app/Contents/MacOS
 
-# Compile
 swiftc scanner.swift \
   -o WifiScanner.app/Contents/MacOS/wifi-scanner \
   -framework CoreWLAN \
@@ -123,7 +120,6 @@ cat > WifiScanner.app/Contents/Info.plist << 'EOF'
 </plist>
 EOF
 
-# Code sign
 codesign --force --sign - WifiScanner.app
 ```
 
@@ -133,43 +129,31 @@ codesign --force --sign - WifiScanner.app
 2. Enable Location Services (if not already)
 3. Find **WifiScanner** in the list and toggle it **ON**
 
-### Generate SSL Certificates (optional, for mobile GPS)
-
-Mobile browsers require HTTPS for the Geolocation API. Generate a self-signed cert for local development:
-
-```bash
-openssl req -x509 -newkey rsa:2048 \
-  -keyout key.pem -out cert.pem \
-  -days 365 -nodes -subj '/CN=localhost'
-```
-
 ### Run
 
 ```bash
 npm start
 ```
 
-Access:
-- **Desktop:** http://localhost:3000
-- **Phone (same Wi-Fi):** https://\<your-local-ip\>:3443 (accept the certificate warning)
-
-The server auto-detects your local IP and prints it on startup.
+Open http://localhost:3000 in your browser.
 
 ---
 
 ## Architecture
 
 ```
-Browser (any device)
+Browser
   |
   |-- GPS ← navigator.geolocation (browser-native)
   |
-  |-- WebSocket ← Real-time scan data from server
+  |-- Saved Data ← scan-data.json (pre-captured APs + RTT)
+  |
+  |-- WebSocket ← Real-time scan data (local server only)
   |       |
   |       v
-  Node.js Server (macOS)
+  Node.js Server (macOS, optional)
     |-- Wi-Fi Scanner ← CoreWLAN via compiled Swift binary
-    |-- RTT Measurement ← TCP SYN timing + ICMP ping to gateway
+    |-- RTT Measurement ← TCP SYN timing + ICMP ping
     |-- ARP Table ← Network device discovery
 ```
 
@@ -177,9 +161,10 @@ Browser (any device)
 
 | File | Purpose |
 |------|---------|
-| `public/index.html` | Triangulation UI — canvas visualization, RSSI/RTT processing, trilateration math, Kalman filter, GPS anchor system |
+| `public/index.html` | Triangulation UI — canvas, RSSI/RTT processing, trilateration, Kalman filter, GPS anchor |
 | `public/map.html` | Live map — Leaflet + OpenStreetMap with GPS tracking and Wi-Fi overlay |
-| `server.js` | Express + WebSocket server, runs scanner, measures RTT, reads ARP table |
+| `public/scan-data.json` | Pre-captured Wi-Fi scan data for static deployment |
+| `server.js` | Express + WebSocket server, runs scanner, measures RTT (local dev only) |
 | `scanner.swift` | macOS Wi-Fi scanner using CoreWLAN + CoreLocation |
 
 ### Signal Processing Pipeline

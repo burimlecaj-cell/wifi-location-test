@@ -5,3 +5,4 @@ WifiScanner.app/
 wifi-scanner
 .env
 .env.local
+.vercel

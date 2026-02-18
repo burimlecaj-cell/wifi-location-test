@@ -1,0 +1,31 @@
+{
+  "location": {
+    "lat": 43.56811210605702,
+    "lng": -79.64925668265069,
+    "accuracy": 5,
+    "description": "Reference scan location"
+  },
+  "scan": {
+    "timestamp": 1771422922.953076,
+    "totalRawNetworks": 11,
+    "locationAuthorized": true,
+    "networks": [
+      {"ssid":"AP_5GHz_ch48_A","bssid":"5G:48:A1","rssi":-32,"noise":0,"channel":48,"band":"5GHz","bandwidthMHz":40},
+      {"ssid":"AP_5GHz_ch48_B","bssid":"5G:48:B2","rssi":-33,"noise":0,"channel":48,"band":"5GHz","bandwidthMHz":40},
+      {"ssid":"AP_6GHz_ch149_A","bssid":"6G:149:A3","rssi":-35,"noise":-88,"channel":149,"band":"6GHz","bandwidthMHz":160},
+      {"ssid":"AP_6GHz_ch149_B","bssid":"6G:149:B4","rssi":-36,"noise":0,"channel":149,"band":"6GHz","bandwidthMHz":160},
+      {"ssid":"AP_2.4GHz_ch11_A","bssid":"2G:11:A5","rssi":-46,"noise":0,"channel":11,"band":"2.4GHz","bandwidthMHz":20},
+      {"ssid":"AP_6GHz_ch213_A","bssid":"6G:213:A6","rssi":-51,"noise":0,"channel":213,"band":"6GHz","bandwidthMHz":160},
+      {"ssid":"AP_2.4GHz_ch6_A","bssid":"2G:6:A7","rssi":-53,"noise":0,"channel":6,"band":"2.4GHz","bandwidthMHz":20},
+      {"ssid":"AP_2.4GHz_ch6_B","bssid":"2G:6:B8","rssi":-63,"noise":0,"channel":6,"band":"2.4GHz","bandwidthMHz":20},
+      {"ssid":"AP_2.4GHz_ch11_B","bssid":"2G:11:B9","rssi":-70,"noise":0,"channel":11,"band":"2.4GHz","bandwidthMHz":20},
+      {"ssid":"AP_5GHz_ch149_A","bssid":"5G:149:A10","rssi":-79,"noise":0,"channel":149,"band":"5GHz","bandwidthMHz":80},
+      {"ssid":"AP_5GHz_ch149_B","bssid":"5G:149:B11","rssi":-80,"noise":0,"channel":149,"band":"5GHz","bandwidthMHz":40}
+    ]
+  },
+  "gatewayRTT": {
+    "host": "gateway",
+    "tcp": {"avgMs":3.19,"minMs":3.09,"maxMs":4.64,"samples":5},
+    "icmp": {"avgMs":2.99,"minMs":2.75,"maxMs":3.34,"jitterMs":0.18,"samples":10}
+  }
+}

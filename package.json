@@ -1,0 +1,14 @@
+{
+  "name": "wifi-location-test",
+  "version": "1.0.0",
+  "description": "Urban Wi-Fi triangulation vs GPS location accuracy test",
+  "scripts": {
+    "start": "node server.js",
+    "simple": "npx serve ."
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "node-wifi": "^2.0.16",
+    "ws": "^8.19.0"
+  }
+}

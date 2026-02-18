@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+*.pem
+WifiScanner.app/
+wifi-scanner
+.env
+.env.local

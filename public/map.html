@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Location Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #06080f;
+            color: #c9d1d9;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            border-bottom: 1px solid #151b2b;
+            background: #0a0e1a;
+            z-index: 1000;
+        }
+        header h1 { font-size: 1rem; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+        #status { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #6b7280; }
+        #status .dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+        #status.connected .dot { background: #22c55e; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        #map { flex: 1; z-index: 0; }
+
+        .stats-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: #0a0e1aee;
+            border: 1px solid #1e2433;
+            border-radius: 12px;
+            padding: 14px 18px;
+            z-index: 1000;
+            min-width: 280px;
+            backdrop-filter: blur(12px);
+        }
+        .stats-panel .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            font-size: 0.72rem;
+        }
+        .stats-panel .label { color: #6b7280; }
+        .stats-panel .value { color: #e5e7eb; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .stats-panel .divider { border-top: 1px solid #1e2433; margin: 6px 0; }
+        .source-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 700;
+        }
+
+        .controls {
+            position: absolute;
+            top: 70px;
+            right: 14px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .ctrl-btn {
+            background: #0a0e1aee;
+            border: 1px solid #1e2433;
+            color: #c9d1d9;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(12px);
+        }
+        .ctrl-btn:hover { border-color: #3b82f6; color: #fff; }
+        .ctrl-btn.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+
+        .wifi-legend {
+            position: absolute;
+            top: 70px;
+            left: 14px;
+            z-index: 1000;
+            background: #0a0e1aee;
+            border: 1px solid #1e2433;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 0.65rem;
+            backdrop-filter: blur(12px);
+            display: none;
+        }
+        .wifi-legend.visible { display: block; }
+        .wifi-legend .item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+        .wifi-legend .circle { width: 10px; height: 10px; border-radius: 50%; }
+
+        @media (max-width: 600px) {
+            header { padding: 10px 14px; }
+            header h1 { font-size: 0.85rem; }
+            .stats-panel { left: 10px; right: 10px; bottom: 10px; min-width: auto; }
+            nav a { padding: 3px 7px !important; font-size: 0.62rem !important; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div style="display:flex;align-items:center;gap:18px;">
+            <h1>Live Location Map</h1>
+            <nav style="display:flex;gap:6px;align-items:center;">
+                <a href="/" style="color:#6b7280;font-size:0.68rem;text-decoration:none;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid #1e2433;">Triangulation</a>
+                <a href="/map.html" style="color:#3b82f6;font-size:0.68rem;text-decoration:none;font-weight:600;padding:4px 10px;background:#3b82f620;border-radius:6px;border:1px solid #3b82f644;">Live Map</a>
+            </nav>
+        </div>
+        <div id="status"><span class="dot"></span><span id="status-text">Acquiring GPS...</span></div>
+    </header>
+
+    <div id="map"></div>
+
+    <div class="controls">
+        <button class="ctrl-btn active" id="btn-follow">Follow</button>
+        <button class="ctrl-btn" id="btn-trail">Trail</button>
+        <button class="ctrl-btn" id="btn-clear">Clear</button>
+    </div>
+
+    <div class="wifi-legend" id="wifi-legend">
+        <div class="item"><div class="circle" style="background:#3b82f6;"></div> GPS Position</div>
+        <div class="item"><div class="circle" style="background:#22c55e;"></div> Wi-Fi Estimate</div>
+    </div>
+
+    <div class="stats-panel" id="stats">
+        <div class="row">
+            <span class="label">Latitude</span>
+            <span class="value" id="s-lat">--</span>
+        </div>
+        <div class="row">
+            <span class="label">Longitude</span>
+            <span class="value" id="s-lng">--</span>
+        </div>
+        <div class="divider"></div>
+        <div class="row">
+            <span class="label">Accuracy</span>
+            <span class="value" id="s-acc">--</span>
+        </div>
+        <div class="row">
+            <span class="label">Speed</span>
+            <span class="value" id="s-speed">--</span>
+        </div>
+        <div class="row">
+            <span class="label">Altitude</span>
+            <span class="value" id="s-alt">--</span>
+        </div>
+        <div class="divider"></div>
+        <div class="row">
+            <span class="label">Source</span>
+            <span class="value" id="s-source">--</span>
+        </div>
+        <div class="row">
+            <span class="label">Points</span>
+            <span class="value" id="s-points">0</span>
+        </div>
+    </div>
+
+<script>
+(() => {
+    const $ = id => document.getElementById(id);
+
+    // ── Map ──
+    const map = L.map('map', {
+        zoomControl: false,
+        attributionControl: false,
+    }).setView([0, 0], 2);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 20,
+    }).addTo(map);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // ── State ──
+    let currentMarker = null;
+    let accuracyCircle = null;
+    let trail = L.polyline([], { color: '#3b82f6', weight: 2.5, opacity: 0.7 }).addTo(map);
+    let wifiMarker = null;
+    let wifiCircle = null;
+    let firstFix = true;
+    let following = true;
+    let showTrail = false;
+    let positions = [];
+
+    // ── Controls ──
+    $('btn-follow').addEventListener('click', () => {
+        following = !following;
+        $('btn-follow').classList.toggle('active', following);
+        if (following && positions.length > 0) {
+            const last = positions[positions.length - 1];
+            map.setView([last.lat, last.lng], map.getZoom());
+        }
+    });
+
+    $('btn-trail').addEventListener('click', () => {
+        showTrail = !showTrail;
+        $('btn-trail').classList.toggle('active', showTrail);
+        trail.setStyle({ opacity: showTrail ? 0.7 : 0 });
+    });
+
+    $('btn-clear').addEventListener('click', () => {
+        positions = [];
+        trail.setLatLngs([]);
+        $('s-points').textContent = '0';
+    });
+
+    // Stop following when user drags map
+    map.on('dragstart', () => {
+        following = false;
+        $('btn-follow').classList.remove('active');
+    });
+
+    // ── Source classification ──
+    function classifySource(accuracy) {
+        if (accuracy <= 15) return { label: 'GPS', color: '#22c55e' };
+        if (accuracy <= 100) return { label: 'Wi-Fi', color: '#3b82f6' };
+        return { label: 'Cell', color: '#f59e0b' };
+    }
+
+    // ── GPS Tracking ──
+    if (!navigator.geolocation) {
+        $('status-text').textContent = 'Geolocation not available';
+        return;
+    }
+
+    navigator.geolocation.watchPosition(
+        (pos) => {
+            const { latitude: lat, longitude: lng, accuracy, speed, altitude } = pos.coords;
+            const latlng = [lat, lng];
+
+            // Status
+            $('status').className = 'connected';
+            $('status-text').textContent = 'Tracking';
+
+            // Marker
+            if (!currentMarker) {
+                currentMarker = L.circleMarker(latlng, {
+                    radius: 8, fillColor: '#3b82f6', fillOpacity: 1,
+                    color: '#fff', weight: 2.5,
+                }).addTo(map);
+            } else {
+                currentMarker.setLatLng(latlng);
+            }
+
+            // Accuracy circle
+            if (!accuracyCircle) {
+                accuracyCircle = L.circle(latlng, {
+                    radius: accuracy, fillColor: '#3b82f6', fillOpacity: 0.08,
+                    color: '#3b82f6', weight: 1, opacity: 0.3,
+                }).addTo(map);
+            } else {
+                accuracyCircle.setLatLng(latlng);
+                accuracyCircle.setRadius(accuracy);
+            }
+
+            // Trail
+            trail.addLatLng(latlng);
+            positions.push({ lat, lng, accuracy, timestamp: Date.now() });
+
+            // Auto-center on first fix
+            if (firstFix) {
+                map.setView(latlng, 17);
+                firstFix = false;
+            } else if (following) {
+                map.setView(latlng, map.getZoom());
+            }
+
+            // Update stats
+            const src = classifySource(accuracy);
+            $('s-lat').textContent = lat.toFixed(10);
+            $('s-lng').textContent = lng.toFixed(10);
+            $('s-acc').textContent = `\u00B1${accuracy.toFixed(1)}m`;
+            $('s-acc').style.color = src.color;
+            $('s-speed').textContent = speed != null ? `${(speed * 3.6).toFixed(1)} km/h` : '--';
+            $('s-alt').textContent = altitude != null ? `${altitude.toFixed(1)}m` : '--';
+            $('s-source').innerHTML = `<span class="source-badge" style="background:${src.color}22;color:${src.color};">${src.label}</span>`;
+            $('s-points').textContent = positions.length;
+        },
+        (err) => {
+            $('status-text').textContent = 'GPS: ' + err.message;
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+
+    // ── WiFi Estimate from Page 1 (via localStorage) ──
+    setInterval(() => {
+        try {
+            const raw = localStorage.getItem('wifiEstimate');
+            if (!raw) return;
+            const est = JSON.parse(raw);
+            if (Date.now() - est.timestamp > 30000) return; // stale (>30s)
+
+            $('wifi-legend').classList.add('visible');
+
+            const latlng = [est.lat, est.lng];
+            if (!wifiMarker) {
+                wifiMarker = L.circleMarker(latlng, {
+                    radius: 6, fillColor: '#22c55e', fillOpacity: 0.9,
+                    color: '#fff', weight: 1.5,
+                }).addTo(map);
+                wifiCircle = L.circle(latlng, {
+                    radius: est.accuracy, fillColor: '#22c55e', fillOpacity: 0.06,
+                    color: '#22c55e', weight: 1, opacity: 0.3,
+                }).addTo(map);
+            } else {
+                wifiMarker.setLatLng(latlng);
+                wifiCircle.setLatLng(latlng);
+                wifiCircle.setRadius(est.accuracy);
+            }
+        } catch(e) {}
+    }, 2000);
+})();
+</script>
+</body>
+</html>

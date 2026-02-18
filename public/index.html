@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wi-Fi RTT Triangulation Engine</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #06080f;
+            color: #c9d1d9;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ── Header ── */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            border-bottom: 1px solid #151b2b;
+            background: #0a0e1a;
+        }
+        header h1 { font-size: 1rem; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+        .header-right { display: flex; align-items: center; gap: 16px; }
+        #status { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #6b7280; }
+        #status .dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+        #status.connected .dot { background: #22c55e; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        .mode-toggle {
+            display: flex;
+            background: #111827;
+            border-radius: 8px;
+            border: 1px solid #1e2433;
+            overflow: hidden;
+        }
+        .mode-toggle button {
+            padding: 5px 12px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            background: transparent;
+            color: #6b7280;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-toggle button.active { background: #3b82f6; color: #fff; }
+        .mode-toggle button:hover:not(.active) { color: #e5e7eb; }
+
+        /* ── Layout ── */
+        .layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            height: calc(100vh - 49px);
+        }
+
+        /* ── Left Panel ── */
+        .panel {
+            border-right: 1px solid #151b2b;
+            overflow-y: auto;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .panel::-webkit-scrollbar { width: 4px; }
+        .panel::-webkit-scrollbar-thumb { background: #1e2433; border-radius: 4px; }
+
+        .panel-section {
+            padding: 12px 14px;
+            border-bottom: 1px solid #151b2b;
+        }
+
+        .section-label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #4b5563;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* ── RTT Display ── */
+        .rtt-hero {
+            text-align: center;
+            padding: 16px;
+            background: linear-gradient(180deg, #0f1525, #0a0e1a);
+        }
+        .rtt-hero .big-num { font-size: 2.4rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .rtt-hero .big-label { font-size: 0.65rem; color: #6b7280; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
+        .rtt-hero .rtt-sub {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 10px;
+            font-size: 0.7rem;
+        }
+        .rtt-hero .rtt-sub span { color: #6b7280; }
+        .rtt-hero .rtt-sub strong { color: #9ca3af; }
+
+        /* Speed of light conversion */
+        .sol-card {
+            background: #0d1117;
+            border: 1px solid #1e2433;
+            border-radius: 10px;
+            padding: 12px;
+            margin-top: 10px;
+        }
+        .sol-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 4px 0;
+            font-size: 0.72rem;
+        }
+        .sol-row .label { color: #6b7280; }
+        .sol-row .value { color: #e5e7eb; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .sol-row .value.highlight { color: #f59e0b; }
+        .sol-row .value.good { color: #22c55e; }
+
+        .sol-explain {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #1e243366;
+            font-size: 0.65rem;
+            color: #4b5563;
+            line-height: 1.5;
+        }
+
+        /* RTT sparkline */
+        .rtt-sparkline { height: 40px; margin-top: 8px; }
+        .rtt-sparkline canvas { width: 100%; height: 100%; display: block; }
+
+        /* ── AP Cards ── */
+        .ap-list { flex: 1; overflow-y: auto; padding: 8px 14px; }
+
+        .ap-card {
+            background: #0d1117;
+            border: 1px solid #1e2433;
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .ap-card:hover { border-color: #374151; background: #111827; }
+        .ap-card.placed { border-color: #3b82f6; }
+        .ap-card.selected { border-color: #8b5cf6; background: #13102a; }
+
+        .ap-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .ap-name { font-size: 0.82rem; font-weight: 600; color: #e5e7eb; display: flex; align-items: center; gap: 6px; }
+        .band-tag { font-size: 0.55rem; padding: 1px 5px; border-radius: 4px; font-weight: 500; }
+        .band-2 { background: #065f4620; color: #10b981; border: 1px solid #10b98133; }
+        .band-5 { background: #1e40af20; color: #60a5fa; border: 1px solid #60a5fa33; }
+        .band-6 { background: #7c3aed20; color: #a78bfa; border: 1px solid #a78bfa33; }
+        .place-btn {
+            font-size: 0.58rem; padding: 2px 8px;
+            background: #1e2433; border: 1px solid #374151; color: #9ca3af;
+            border-radius: 6px; cursor: pointer;
+        }
+        .place-btn:hover { background: #374151; color: #fff; }
+        .ap-card.placed .place-btn { background: #3b82f622; border-color: #3b82f6; color: #60a5fa; }
+
+        .ap-meta { font-size: 0.65rem; color: #4b5563; display: flex; gap: 10px; margin-bottom: 6px; }
+        .signal-bar-bg { height: 3px; background: #1e2433; border-radius: 2px; overflow: hidden; }
+        .signal-bar { height: 100%; border-radius: 2px; transition: width 0.5s; }
+
+        .ap-bottom { display: flex; justify-content: space-between; font-size: 0.67rem; color: #6b7280; margin-top: 6px; }
+        .ap-bottom .dist { color: #9ca3af; }
+
+        /* ── Config ── */
+        .config-row { display: flex; justify-content: space-between; align-items: center; margin: 5px 0; }
+        .config-row label { font-size: 0.7rem; color: #9ca3af; }
+        .config-row input[type="range"] { width: 110px; accent-color: #3b82f6; }
+        .config-row .val { font-size: 0.7rem; color: #60a5fa; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+
+        /* ── Canvas ── */
+        .canvas-area { position: relative; background: #060810; overflow: hidden; }
+        #trilatCanvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+
+        .canvas-hud { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 6px; }
+        .hud-card {
+            background: #0d1117dd; backdrop-filter: blur(12px);
+            border: 1px solid #1e2433; border-radius: 10px; padding: 10px 14px;
+        }
+        .hud-label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 1px; color: #4b5563; margin-bottom: 3px; }
+        .hud-value { font-size: 0.95rem; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+        .hud-sub { font-size: 0.62rem; color: #6b7280; margin-top: 2px; }
+
+        .canvas-instructions {
+            position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+            background: #0d1117dd; backdrop-filter: blur(12px);
+            border: 1px solid #1e2433; border-radius: 8px;
+            padding: 8px 18px; font-size: 0.72rem; color: #9ca3af;
+            text-align: center; pointer-events: none; transition: opacity 0.3s;
+        }
+
+        /* RTT animation overlay */
+        .rtt-anim-overlay {
+            position: absolute; top: 12px; left: 12px;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .rtt-anim-card {
+            background: #0d1117dd; backdrop-filter: blur(12px);
+            border: 1px solid #1e2433; border-radius: 10px; padding: 10px 14px;
+            min-width: 200px;
+        }
+        .rtt-anim-card .label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 1px; color: #4b5563; margin-bottom: 6px; }
+        #rtt-wave-canvas { width: 100%; height: 60px; display: block; }
+
+        /* Legend */
+        .canvas-legend {
+            position: absolute; bottom: 16px; right: 12px;
+            background: #0d1117dd; backdrop-filter: blur(12px);
+            border: 1px solid #1e2433; border-radius: 8px;
+            padding: 8px 12px; font-size: 0.6rem;
+        }
+        .canvas-legend div { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: #6b7280; }
+        .canvas-legend .swatch { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+        /* Responsive */
+        @media (max-width: 800px) {
+            .layout { grid-template-columns: 1fr; grid-template-rows: 50vh 50vh; }
+            .panel { border-right: none; border-bottom: 1px solid #151b2b; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div style="display:flex;align-items:center;gap:18px;">
+            <h1>Wi-Fi RTT Triangulation</h1>
+            <nav style="display:flex;gap:6px;align-items:center;">
+                <a href="/" style="color:#3b82f6;font-size:0.68rem;text-decoration:none;font-weight:600;padding:4px 10px;background:#3b82f620;border-radius:6px;border:1px solid #3b82f644;">Triangulation</a>
+                <a href="/map.html" style="color:#6b7280;font-size:0.68rem;text-decoration:none;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid #1e2433;">Live Map</a>
+            </nav>
+        </div>
+        <div class="header-right">
+            <div class="mode-toggle">
+                <button id="mode-rssi" class="active">RSSI</button>
+                <button id="mode-hybrid">Hybrid</button>
+                <button id="mode-rtt">RTT</button>
+            </div>
+            <div id="status"><span class="dot"></span><span id="status-text">Connecting...</span></div>
+        </div>
+    </header>
+
+    <div class="layout">
+        <div class="panel">
+            <!-- RTT Hero -->
+            <div class="rtt-hero" id="rtt-section">
+                <div class="big-num" id="rtt-big" style="color:#3b82f6;">—</div>
+                <div class="big-label">Gateway Round-Trip Time</div>
+                <div class="rtt-sub">
+                    <span>Min: <strong id="rtt-min">—</strong></span>
+                    <span>Max: <strong id="rtt-max">—</strong></span>
+                    <span>Jitter: <strong id="rtt-jitter">—</strong></span>
+                </div>
+
+                <div class="sol-card">
+                    <div class="sol-row">
+                        <span class="label">Raw RTT distance (c &times; t/2)</span>
+                        <span class="value" id="sol-raw">—</span>
+                    </div>
+                    <div class="sol-row">
+                        <span class="label">Est. processing overhead</span>
+                        <span class="value" id="sol-overhead">—</span>
+                    </div>
+                    <div class="sol-row">
+                        <span class="label">Corrected signal flight</span>
+                        <span class="value highlight" id="sol-corrected">—</span>
+                    </div>
+                    <div class="sol-row">
+                        <span class="label">Corrected distance</span>
+                        <span class="value good" id="sol-dist">—</span>
+                    </div>
+                    <div class="sol-explain">
+                        Network-layer RTT includes kernel + firmware processing (~0.1-1ms).
+                        802.11mc FTM measures at the physical layer with <strong style="color:#f59e0b;">&lt;100 picosecond</strong> precision,
+                        giving <strong style="color:#22c55e;">sub-1 meter</strong> accuracy.
+                    </div>
+                </div>
+
+                <div class="rtt-sparkline"><canvas id="rtt-spark"></canvas></div>
+            </div>
+
+            <!-- Config -->
+            <div class="panel-section">
+                <div class="section-label">Path Loss Model</div>
+                <div class="config-row">
+                    <label>Tx Power (1m)</label>
+                    <input type="range" id="txPower" min="-60" max="-20" value="-40">
+                    <span class="val" id="txPowerVal">-40 dBm</span>
+                </div>
+                <div class="config-row">
+                    <label>Path Loss (n)</label>
+                    <input type="range" id="pathLoss" min="15" max="50" value="28">
+                    <span class="val" id="pathLossVal">2.8</span>
+                </div>
+                <div class="config-row">
+                    <label>Grid scale</label>
+                    <input type="range" id="gridScale" min="1" max="30" value="5">
+                    <span class="val" id="gridScaleVal">5 m</span>
+                </div>
+            </div>
+
+            <!-- Location permission banner -->
+            <div id="location-banner" class="panel-section" style="display:none;">
+                <div style="background:#f59e0b15; border:1px solid #f59e0b33; border-radius:8px; padding:10px 12px;">
+                    <div style="font-size:0.75rem; font-weight:600; color:#f59e0b; margin-bottom:4px;">
+                        Location Services Required
+                    </div>
+                    <div style="font-size:0.65rem; color:#9ca3af; line-height:1.5;">
+                        macOS is hiding network names (SSIDs) and MAC addresses (BSSIDs).
+                        To see real AP names, grant location access:
+                    </div>
+                    <div style="font-size:0.62rem; color:#6b7280; line-height:1.6; margin-top:6px; font-family:monospace;">
+                        System Settings &rarr; Privacy &amp; Security &rarr; Location Services &rarr; <strong style="color:#f59e0b;">WifiScanner</strong> &rarr; ON
+                    </div>
+                    <div style="font-size:0.6rem; color:#4b5563; margin-top:6px;">
+                        <span id="raw-count"></span> APs detected &mdash; names are redacted without location permission
+                    </div>
+                </div>
+            </div>
+
+            <!-- AP List -->
+            <div class="panel-section" style="padding-bottom:4px;">
+                <div class="section-label">
+                    Access Points <span id="ap-count" style="color:#60a5fa;">0</span>
+                </div>
+            </div>
+            <div class="ap-list" id="ap-list"></div>
+        </div>
+
+        <!-- Canvas -->
+        <div class="canvas-area">
+            <canvas id="trilatCanvas"></canvas>
+
+            <div class="rtt-anim-overlay">
+                <div class="rtt-anim-card">
+                    <div class="label">Signal Time-of-Flight</div>
+                    <canvas id="rtt-wave-canvas"></canvas>
+                </div>
+            </div>
+
+            <div class="canvas-hud">
+                <div class="hud-card">
+                    <div class="hud-label">GPS Coordinates (Wi-Fi Estimated)</div>
+                    <div class="hud-value" id="hud-gps" style="font-size:0.85rem;">Acquiring GPS anchor...</div>
+                    <div class="hud-sub" id="hud-gps-sub">Browser geolocation + Wi-Fi offset</div>
+                </div>
+                <div class="hud-card">
+                    <div class="hud-label">Grid Position (meters)</div>
+                    <div class="hud-value" id="hud-pos">— , —</div>
+                    <div class="hud-sub" id="hud-confidence">Place 3+ APs to triangulate</div>
+                </div>
+                <div class="hud-card">
+                    <div class="hud-label">GPS Anchor (Browser)</div>
+                    <div class="hud-value" id="hud-anchor" style="font-size:0.8rem;">Waiting...</div>
+                    <div class="hud-sub" id="hud-anchor-acc">Click "Set GPS Anchor" to mark your current spot as (0,0)</div>
+                </div>
+                <div class="hud-card">
+                    <div class="hud-label">Method</div>
+                    <div class="hud-value" id="hud-method">RSSI</div>
+                    <div class="hud-sub" id="hud-placed">0 / 3 APs placed</div>
+                </div>
+                <div class="hud-card" style="cursor:pointer;text-align:center;" id="anchor-btn">
+                    <div style="color:#3b82f6;font-weight:700;font-size:0.8rem;">Set GPS Anchor</div>
+                    <div class="hud-sub">Use current browser location as origin (0,0)</div>
+                </div>
+            </div>
+
+            <div class="canvas-instructions" id="instructions">
+                Click an AP from the list, then click the map to place it
+            </div>
+
+            <div class="canvas-legend">
+                <div><span class="swatch" style="background:#3b82f6;"></span> AP (RSSI ring)</div>
+                <div><span class="swatch" style="background:#22c55e;"></span> AP (RTT ring)</div>
+                <div><span class="swatch" style="background:#f59e0b;"></span> Intersection</div>
+                <div><span class="swatch" style="background:#ef4444;"></span> Est. position</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+(() => {
+    const SPEED_OF_LIGHT = 299792458; // m/s
+
+    // ── State ──
+    const state = {
+        networks: [],
+        apPositions: {},     // ssid -> { x, y }
+        selectedAP: null,
+        estimatedPos: null,
+        residual: 0,
+        placingMode: false,
+        mode: 'rssi',        // 'rssi' | 'hybrid' | 'rtt'
+        gatewayRTT: null,
+        rttHistory: [],      // array of avg RTT values for sparkline
+        maxRTTHistory: 60,
+        // Camera
+        camX: 0, camY: 0,
+        dragging: false, dragStartX: 0, dragStartY: 0, camStartX: 0, camStartY: 0,
+        // RTT wave animation
+        wavePhase: 0,
+        // Location permission
+        locationAuthorized: false,
+        totalRawNetworks: 0,
+        // GPS anchor: browser geolocation fix used as reference for (0,0)
+        gpsAnchor: null,        // { lat, lng, accuracy, timestamp }
+        browserGPS: null,       // latest browser GPS reading
+        gpsWatchId: null,
+    };
+
+    // ── DOM ──
+    const $ = id => document.getElementById(id);
+
+    // Config
+    const txPowerEl = $('txPower'), pathLossEl = $('pathLoss'), gridScaleEl = $('gridScale');
+    const txPowerValEl = $('txPowerVal'), pathLossValEl = $('pathLossVal'), gridScaleValEl = $('gridScaleVal');
+
+    function getTxPower() { return parseInt(txPowerEl.value); }
+    function getPathLoss() { return parseInt(pathLossEl.value) / 10; }
+    function getGridScale() { return parseInt(gridScaleEl.value); }
+
+    txPowerEl.addEventListener('input', () => { txPowerValEl.textContent = txPowerEl.value + ' dBm'; recalculate(); });
+    pathLossEl.addEventListener('input', () => { pathLossValEl.textContent = (parseInt(pathLossEl.value) / 10).toFixed(1); recalculate(); });
+    gridScaleEl.addEventListener('input', () => { gridScaleValEl.textContent = gridScaleEl.value + ' m'; recalculate(); });
+
+    // Mode toggle
+    document.querySelectorAll('.mode-toggle button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.mode-toggle button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.mode = btn.id.replace('mode-', '');
+            $('hud-method').textContent = { rssi: 'RSSI Only', hybrid: 'RSSI + RTT', rtt: 'RTT Sim' }[state.mode];
+            recalculate();
+        });
+    });
+
+    // ══════════════════════════════════════════════════════════════
+    // RSSI → Distance: Frequency-Aware Log-Distance Path Loss Model
+    // ══════════════════════════════════════════════════════════════
+    //
+    // Standard model: d = 10^((P_tx - RSSI) / (10 * n))
+    //
+    // Improvements:
+    // 1. Frequency-dependent free-space path loss (FSPL)
+    //    FSPL(dB) = 20*log10(d) + 20*log10(f) - 147.55
+    //    Different bands attenuate differently through materials
+    //
+    // 2. Per-band calibrated path loss exponents:
+    //    2.4 GHz: n ≈ 2.7-3.5 (better wall penetration, more interference)
+    //    5 GHz:   n ≈ 3.0-4.0 (worse wall penetration, less interference)
+    //    6 GHz:   n ≈ 3.2-4.5 (worst penetration, cleanest spectrum)
+    //
+    // 3. SNR-based confidence weighting
+
+    // Reference Tx power at 1m per band (typical AP)
+    const BAND_TX_POWER = { '2.4GHz': -38, '5GHz': -40, '6GHz': -42 };
+    // Path loss exponent per band (indoor, moderate obstructions)
+    const BAND_PATH_LOSS = { '2.4GHz': 2.8, '5GHz': 3.2, '6GHz': 3.5 };
+    // Frequency in MHz for FSPL correction
+    const BAND_FREQ_MHZ = { '2.4GHz': 2437, '5GHz': 5200, '6GHz': 6000 };
+    // Typical noise floor per band
+    const BAND_NOISE_FLOOR = { '2.4GHz': -90, '5GHz': -92, '6GHz': -95 };
+
+    function rssiToDistance(rssi, net) {
+        const band = net?.band || '5GHz';
+        // Use per-band defaults or user override
+        const txPower = getTxPower() !== -40 ? getTxPower() : (BAND_TX_POWER[band] || -40);
+        const n = getPathLoss() !== 2.8 ? getPathLoss() : (BAND_PATH_LOSS[band] || 3.0);
+
+        // Log-distance path loss model
+        let dist = Math.pow(10, (txPower - rssi) / (10 * n));
+
+        // Clamp to reasonable indoor range
+        return Math.max(0.3, Math.min(dist, 300));
+    }
+
+    // Estimate distance uncertainty based on signal quality
+    function distanceUncertainty(rssi, net) {
+        const noise = net?.noise || (BAND_NOISE_FLOOR[net?.band] || -90);
+        const snr = rssi - noise;
+        // Higher SNR = more reliable distance estimate
+        // Typical indoor: SNR 10-40dB
+        // Uncertainty roughly inversely proportional to SNR
+        const dist = rssiToDistance(rssi, net);
+        if (snr > 30) return dist * 0.15;  // ±15% at high SNR
+        if (snr > 20) return dist * 0.25;  // ±25%
+        if (snr > 10) return dist * 0.40;  // ±40%
+        return dist * 0.60;                 // ±60% at low SNR
+    }
+
+    function signalPercent(rssi) {
+        return Math.max(0, Math.min(100, (rssi + 100) * (100 / 80)));
+    }
+    function signalColor(rssi) {
+        if (rssi >= -50) return '#22c55e';
+        if (rssi >= -70) return '#f59e0b';
+        return '#ef4444';
+    }
+    function bandClass(band) {
+        if (!band) return '';
+        if (band.includes('2.4')) return 'band-2';
+        if (band.includes('5')) return 'band-5';
+        if (band.includes('6')) return 'band-6';
+        return '';
+    }
+
+    // ══════════════════════════════
+    // RTT → Distance (Speed of Light)
+    // ══════════════════════════════
+    function rttToDistance(rttMs) {
+        return (rttMs / 1000 / 2) * SPEED_OF_LIGHT;
+    }
+
+    // Estimate processing overhead using statistical minimum RTT
+    // The minimum observed RTT across samples is closest to true signal time + fixed overhead
+    function estimateProcessingOverhead(rttData) {
+        if (!rttData || !rttData.allMs || rttData.allMs.length === 0) {
+            return rttData ? rttData.avgMs * 0.999 : 0;
+        }
+        // The minimum RTT minus estimated signal flight time for ~10m
+        // 10m round trip = 20m / c ≈ 66.7 nanoseconds ≈ 0.0000667 ms
+        const minRTT = rttData.minMs;
+        const typicalFlightMs = 0.0001; // ~15m round trip
+        return Math.max(0, minRTT - typicalFlightMs);
+    }
+
+    // ═══════════════════════════
+    // Kalman Filter (1D per axis)
+    // ═══════════════════════════
+    // Smooths position estimates over time, reducing jitter
+    class KalmanFilter1D {
+        constructor(processNoise = 0.01, measurementNoise = 1.0) {
+            this.x = 0;        // state estimate
+            this.P = 100;      // estimate uncertainty
+            this.Q = processNoise;    // process noise
+            this.R = measurementNoise; // measurement noise
+            this.initialized = false;
+        }
+        update(measurement, noise) {
+            if (noise !== undefined) this.R = noise;
+            if (!this.initialized) {
+                this.x = measurement;
+                this.P = this.R;
+                this.initialized = true;
+                return this.x;
+            }
+            // Predict
+            this.P += this.Q;
+            // Update
+            const K = this.P / (this.P + this.R);
+            this.x += K * (measurement - this.x);
+            this.P *= (1 - K);
+            return this.x;
+        }
+        reset() { this.initialized = false; this.P = 100; }
+    }
+
+    const kalmanX = new KalmanFilter1D(0.005, 0.5);
+    const kalmanY = new KalmanFilter1D(0.005, 0.5);
+
+    // ── Update RTT display ──
+    function updateRTTDisplay() {
+        const g = state.gatewayRTT;
+        if (!g) return;
+
+        const rtt = g.icmp || g.tcp;
+        if (!rtt) return;
+
+        const avgMs = rtt.avgMs;
+        $('rtt-big').textContent = avgMs.toFixed(3) + ' ms';
+        $('rtt-big').style.color = avgMs < 5 ? '#22c55e' : avgMs < 20 ? '#f59e0b' : '#ef4444';
+        $('rtt-min').textContent = rtt.minMs.toFixed(3) + ' ms';
+        $('rtt-max').textContent = rtt.maxMs.toFixed(3) + ' ms';
+        $('rtt-jitter').textContent = (rtt.jitterMs !== undefined ? rtt.jitterMs.toFixed(3) : (rtt.maxMs - rtt.minMs).toFixed(3)) + ' ms';
+
+        // Speed of light calculations with statistical overhead removal
+        const rawDist = rttToDistance(avgMs);
+        const overhead = estimateProcessingOverhead(rtt);
+        const correctedRTT = Math.max(0.0000001, avgMs - overhead);
+        const correctedDist = rttToDistance(correctedRTT);
+        const minFlightDist = rttToDistance(rtt.minMs - overhead);
+
+        $('sol-raw').textContent = rawDist > 1000 ? (rawDist / 1000).toFixed(1) + ' km' : rawDist.toFixed(1) + ' m';
+        $('sol-overhead').textContent = '~' + overhead.toFixed(4) + ' ms (from min RTT)';
+        $('sol-corrected').textContent = (correctedRTT * 1e6).toFixed(0) + ' ns (' + correctedRTT.toFixed(6) + ' ms)';
+        $('sol-dist').textContent = correctedDist.toFixed(2) + ' m (min: ' + Math.max(0, minFlightDist).toFixed(2) + 'm)';
+
+        // Sparkline
+        state.rttHistory.push(avgMs);
+        if (state.rttHistory.length > state.maxRTTHistory) state.rttHistory.shift();
+        drawRTTSparkline();
+    }
+
+    function drawRTTSparkline() {
+        const canvas = $('rtt-spark');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = 40 * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const W = rect.width, H = 40;
+
+        ctx.clearRect(0, 0, W, H);
+        if (state.rttHistory.length < 2) return;
+
+        const data = state.rttHistory;
+        const max = Math.max(...data) * 1.2 || 1;
+
+        // Fill
+        ctx.fillStyle = '#3b82f610';
+        ctx.beginPath();
+        ctx.moveTo(0, H);
+        for (let i = 0; i < data.length; i++) {
+            const x = (i / (state.maxRTTHistory - 1)) * W;
+            const y = H - (data[i] / max) * H * 0.9;
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(((data.length - 1) / (state.maxRTTHistory - 1)) * W, H);
+        ctx.fill();
+
+        // Line
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < data.length; i++) {
+            const x = (i / (state.maxRTTHistory - 1)) * W;
+            const y = H - (data[i] / max) * H * 0.9;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Trilateration: Weighted Nonlinear Least Squares (WNLS)
+    // ═══════════════════════════════════════════════════════
+    //
+    // Minimizes: Σ w_i * (||p - c_i|| - r_i)²
+    //
+    // Weights are based on:
+    //   1. SNR (signal-to-noise ratio) — higher = more reliable distance
+    //   2. Distance uncertainty — closer APs have proportionally tighter estimates
+    //   3. Band reliability — 5GHz/6GHz less prone to interference than 2.4GHz
+    //
+    // Uses adaptive learning rate with momentum for faster convergence.
+
+    function trilaterate(circles) {
+        if (circles.length < 3) return null;
+
+        // Weighted centroid as initial guess
+        let totalW = 0;
+        let x = 0, y = 0;
+        for (const c of circles) {
+            const w = c.weight || 1;
+            x += c.x * w;
+            y += c.y * w;
+            totalW += w;
+        }
+        x /= totalW;
+        y /= totalW;
+
+        // Gradient descent with momentum
+        let vx = 0, vy = 0;
+        const momentum = 0.7;
+        let lr = 0.01;
+
+        for (let iter = 0; iter < 3000; iter++) {
+            let gx = 0, gy = 0;
+            let totalError = 0;
+
+            for (const c of circles) {
+                const dx = x - c.x;
+                const dy = y - c.y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1e-10;
+                const err = dist - c.r;
+                const w = c.weight || 1;
+                totalError += w * err * err;
+                gx += 2 * w * err * (dx / dist);
+                gy += 2 * w * err * (dy / dist);
+            }
+
+            // Adaptive learning rate — reduce as we converge
+            if (iter > 1000) lr = 0.005;
+            if (iter > 2000) lr = 0.002;
+
+            vx = momentum * vx - lr * gx;
+            vy = momentum * vy - lr * gy;
+            x += vx;
+            y += vy;
+
+            // Early exit if converged
+            if (iter > 100 && Math.abs(vx) < 1e-10 && Math.abs(vy) < 1e-10) break;
+        }
+
+        // Compute weighted residual and 95% confidence radius
+        let weightedResidual = 0;
+        let maxAbsError = 0;
+        for (const c of circles) {
+            const dist = Math.sqrt((x - c.x) ** 2 + (y - c.y) ** 2);
+            const err = Math.abs(dist - c.r);
+            weightedResidual += (c.weight || 1) * err;
+            maxAbsError = Math.max(maxAbsError, err);
+        }
+        weightedResidual /= totalW;
+
+        // Apply Kalman filter for temporal smoothing
+        const filteredX = kalmanX.update(x, weightedResidual);
+        const filteredY = kalmanY.update(y, weightedResidual);
+
+        return {
+            x: filteredX,
+            y: filteredY,
+            rawX: x,
+            rawY: y,
+            residual: weightedResidual,
+            maxError: maxAbsError,
+            confidence95: weightedResidual * 1.96, // 95% CI assuming normal
+        };
+    }
+
+    // ── AP list rendering ──
+    function renderAPList() {
+        $('ap-count').textContent = state.networks.length;
+        const list = $('ap-list');
+        list.innerHTML = '';
+
+        for (const net of state.networks) {
+            const dist = rssiToDistance(net.rssi, net);
+            const uncertainty = distanceUncertainty(net.rssi, net);
+            const pct = signalPercent(net.rssi);
+            const isPlaced = net.ssid in state.apPositions;
+            const isSelected = state.selectedAP === net.ssid;
+
+            const card = document.createElement('div');
+            card.className = 'ap-card' + (isPlaced ? ' placed' : '') + (isSelected ? ' selected' : '');
+            card.innerHTML = `
+                <div class="ap-top">
+                    <div class="ap-name">
+                        ${esc(net.ssid)}
+                        <span class="band-tag ${bandClass(net.band)}">${net.band || '?'}</span>
+                    </div>
+                    <button class="place-btn">${isPlaced ? 'Move' : 'Place'}</button>
+                </div>
+                <div class="ap-meta">
+                    <span>Ch ${net.channel}</span>
+                    <span>${net.rssi} dBm</span>
+                    <span>SNR ${net.rssi - (net.noise || -90)} dB</span>
+                    ${net.bandwidthMHz ? `<span>${net.bandwidthMHz}MHz</span>` : ''}
+                </div>
+                <div class="signal-bar-bg"><div class="signal-bar" style="width:${pct}%;background:${signalColor(net.rssi)};"></div></div>
+                <div class="ap-bottom">
+                    <span class="dist">Est: <strong>${dist.toFixed(2)}m</strong> ±${uncertainty.toFixed(1)}m</span>
+                    <span>${isPlaced ? 'On map' : 'Click to place'}</span>
+                </div>
+            `;
+
+            const selectAP = () => {
+                state.selectedAP = net.ssid;
+                state.placingMode = true;
+                renderAPList();
+                $('instructions').textContent = `Click the map to place "${net.ssid}"`;
+                $('instructions').style.opacity = '1';
+            };
+            card.addEventListener('click', selectAP);
+            card.querySelector('.place-btn').addEventListener('click', (e) => { e.stopPropagation(); selectAP(); });
+
+            list.appendChild(card);
+        }
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function updateLocationBanner() {
+        const banner = $('location-banner');
+        if (!state.locationAuthorized && state.networks.length > 0) {
+            banner.style.display = 'block';
+            $('raw-count').textContent = state.totalRawNetworks || state.networks.length;
+        } else {
+            banner.style.display = 'none';
+        }
+    }
+
+    // ── Recalculate ──
+    function recalculate() {
+        const circles = [];
+        const scale = getGridScale();
+
+        for (const [ssid, pos] of Object.entries(state.apPositions)) {
+            const net = state.networks.find(n => n.ssid === ssid);
+            if (!net) continue;
+
+            const rssiDist = rssiToDistance(net.rssi, net);
+            const unc = distanceUncertainty(net.rssi, net);
+            const noise = net.noise || (BAND_NOISE_FLOOR[net.band] || -90);
+            const snr = net.rssi - noise;
+
+            let dist = rssiDist;
+            // SNR-based weight: higher SNR = more reliable = higher weight
+            // weight = (SNR / baseline)^2 so good signals dominate
+            let weight = Math.pow(Math.max(1, snr) / 15, 2);
+
+            // Band reliability bonus: 5/6 GHz less congested
+            if (net.band === '5GHz') weight *= 1.2;
+            if (net.band === '6GHz') weight *= 1.4;
+
+            if (state.mode === 'hybrid') {
+                // Hybrid: additional weight from simulated RTT precision
+                weight *= 1.5;
+            } else if (state.mode === 'rtt') {
+                // RTT sim: much tighter — simulate 802.11mc sub-meter precision
+                weight *= 4;
+            }
+
+            circles.push({
+                x: pos.x, y: pos.y,
+                r: dist / scale,
+                weight,
+                ssid,
+                rssi: net.rssi,
+                noise,
+                snr,
+                distMeters: dist,
+                uncertainty: unc,
+                band: net.band,
+            });
+        }
+
+        const placedCount = circles.length;
+        $('hud-placed').textContent = `${placedCount} / 3 APs placed`;
+
+        if (placedCount >= 3) {
+            const result = trilaterate(circles);
+            state.estimatedPos = { x: result.x, y: result.y };
+            state.residual = result.residual * scale;
+            state.confidence95 = result.confidence95 * scale;
+            $('hud-pos').textContent =
+                `(${(result.x * scale).toFixed(4)}, ${(result.y * scale).toFixed(4)}) m`;
+            $('hud-confidence').textContent =
+                `±${state.residual.toFixed(2)}m residual | 95% CI: ±${state.confidence95.toFixed(2)}m | ${state.mode.toUpperCase()} | Kalman filtered`;
+        } else {
+            state.estimatedPos = null;
+            kalmanX.reset();
+            kalmanY.reset();
+            $('hud-pos').textContent = '— , —';
+            $('hud-confidence').textContent = `Need ${3 - placedCount} more AP${3 - placedCount !== 1 ? 's' : ''}`;
+        }
+
+        updateGPSDisplay();
+        renderAPList();
+        drawCanvas();
+    }
+
+    // ── Canvas ──
+    const canvas = $('trilatCanvas');
+    const ctx = canvas.getContext('2d');
+    const GRID = 50;
+
+    function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawCanvas();
+    }
+
+    function toScreen(gx, gy) {
+        const r = canvas.getBoundingClientRect();
+        return [r.width / 2 + (gx - state.camX) * GRID, r.height / 2 + (gy - state.camY) * GRID];
+    }
+    function toGrid(sx, sy) {
+        const r = canvas.getBoundingClientRect();
+        return [(sx - r.width / 2) / GRID + state.camX, (sy - r.height / 2) / GRID + state.camY];
+    }
+
+    function drawCanvas() {
+        const r = canvas.getBoundingClientRect();
+        const W = r.width, H = r.height;
+        const scale = getGridScale();
+
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#060810';
+        ctx.fillRect(0, 0, W, H);
+
+        // Grid
+        const offX = (W / 2 - state.camX * GRID) % GRID;
+        const offY = (H / 2 - state.camY * GRID) % GRID;
+        ctx.strokeStyle = '#0f1520';
+        ctx.lineWidth = 1;
+        for (let x = offX; x < W; x += GRID) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+        for (let y = offY; y < H; y += GRID) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+        // Origin
+        const [ox, oy] = toScreen(0, 0);
+        ctx.strokeStyle = '#1e243366';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#374151';
+        ctx.font = '10px monospace';
+        ctx.fillText('0,0', ox + 4, oy - 4);
+
+        // ── Draw placed APs ──
+        const drawnCircles = [];
+
+        for (const [ssid, pos] of Object.entries(state.apPositions)) {
+            const net = state.networks.find(n => n.ssid === ssid);
+            if (!net) continue;
+            const rssiDist = rssiToDistance(net.rssi, net);
+            const rGrid = rssiDist / scale;
+            const rPx = rGrid * GRID;
+            const [sx, sy] = toScreen(pos.x, pos.y);
+
+            drawnCircles.push({ sx, sy, rPx, ssid, rssi: net.rssi });
+
+            // RSSI circle (always drawn, dimmer in RTT mode)
+            const rssiAlpha = state.mode === 'rtt' ? '22' : '44';
+            ctx.strokeStyle = '#3b82f6' + rssiAlpha;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.arc(sx, sy, rPx, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#3b82f608';
+            ctx.beginPath();
+            ctx.arc(sx, sy, rPx, 0, Math.PI * 2);
+            ctx.fill();
+
+            // RTT circle (tighter, in hybrid/rtt modes)
+            if (state.mode !== 'rssi') {
+                // Simulate RTT giving a tighter distance estimate
+                // 802.11mc typically has ~1m precision vs RSSI's 5-15m
+                const rttPrecision = state.mode === 'rtt' ? 0.85 : 0.92;
+                const rttDist = rssiDist * rttPrecision;
+                const rttPx = (rttDist / scale) * GRID;
+
+                ctx.strokeStyle = '#22c55e66';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.arc(sx, sy, rttPx, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // RTT precision band
+                const innerPx = ((rttDist - 1) / scale) * GRID;
+                const outerPx = ((rttDist + 1) / scale) * GRID;
+                ctx.fillStyle = '#22c55e0a';
+                ctx.beginPath();
+                ctx.arc(sx, sy, outerPx, 0, Math.PI * 2);
+                ctx.arc(sx, sy, Math.max(0, innerPx), 0, Math.PI * 2, true);
+                ctx.fill();
+            }
+
+            // AP dot
+            const apColor = state.mode === 'rtt' ? '#22c55e' : '#3b82f6';
+            ctx.fillStyle = apColor;
+            ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill();
+
+            // Labels
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = '11px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(ssid.length > 18 ? ssid.slice(0, 17) + '…' : ssid, sx, sy - 14);
+            ctx.fillStyle = '#4b5563';
+            ctx.font = '9px monospace';
+            ctx.fillText(`${net.rssi}dBm · ${rssiDist.toFixed(1)}m`, sx, sy + 22);
+            ctx.textAlign = 'left';
+        }
+
+        // Intersections
+        if (drawnCircles.length >= 2) {
+            for (let i = 0; i < drawnCircles.length; i++) {
+                for (let j = i + 1; j < drawnCircles.length; j++) {
+                    const pts = circleIntersections(
+                        drawnCircles[i].sx, drawnCircles[i].sy, drawnCircles[i].rPx,
+                        drawnCircles[j].sx, drawnCircles[j].sy, drawnCircles[j].rPx
+                    );
+                    if (pts) {
+                        for (const p of pts) {
+                            ctx.fillStyle = '#f59e0b66';
+                            ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+                        }
+                        ctx.strokeStyle = '#f59e0b1a';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.moveTo(pts[0].x, pts[0].y);
+                        ctx.lineTo(pts[1].x, pts[1].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        // Estimated position
+        if (state.estimatedPos) {
+            const [ex, ey] = toScreen(state.estimatedPos.x, state.estimatedPos.y);
+            const uncPx = (state.residual / scale) * GRID;
+
+            // Uncertainty zone
+            ctx.fillStyle = '#f59e0b12';
+            ctx.strokeStyle = '#f59e0b44';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(ex, ey, Math.max(10, uncPx), 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+
+            // Position dot
+            ctx.fillStyle = '#ef4444';
+            ctx.shadowColor = '#ef444488';
+            ctx.shadowBlur = 14;
+            ctx.beginPath(); ctx.arc(ex, ey, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill();
+
+            // Label
+            ctx.fillStyle = '#ef4444';
+            ctx.font = 'bold 11px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('YOU', ex, ey - 18);
+            ctx.font = '9px monospace';
+            ctx.fillStyle = '#9ca3af';
+            ctx.fillText(`±${state.residual.toFixed(1)}m`, ex, ey + 24);
+            // Show GPS coordinates on canvas if anchor is set
+            if (state.gpsAnchor) {
+                const scale = getGridScale();
+                const gps = offsetToGPS(state.gpsAnchor, state.estimatedPos.x * scale, state.estimatedPos.y * scale);
+                ctx.fillStyle = '#22c55e99';
+                ctx.font = '8px monospace';
+                ctx.fillText(`${gps.lat.toFixed(10)}, ${gps.lng.toFixed(10)}`, ex, ey + 36);
+                ctx.fillStyle = '#6b728088';
+                ctx.font = '7px monospace';
+                const ci = state.confidence95 || state.residual * 1.96;
+                ctx.fillText(`95% CI: ±${ci.toFixed(2)}m`, ex, ey + 46);
+            }
+            ctx.textAlign = 'left';
+        }
+
+        // Scale bar
+        ctx.strokeStyle = '#374151';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(16, H - 20); ctx.lineTo(16 + GRID, H - 20); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(16, H - 24); ctx.lineTo(16, H - 16); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(16 + GRID, H - 24); ctx.lineTo(16 + GRID, H - 16); ctx.stroke();
+        ctx.fillStyle = '#374151';
+        ctx.font = '10px monospace';
+        ctx.fillText(`${scale}m`, 16 + GRID / 2 - 8, H - 8);
+    }
+
+    function circleIntersections(x1, y1, r1, x2, y2, r2) {
+        const dx = x2 - x1, dy = y2 - y1;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) return null;
+        const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+        const h = Math.sqrt(Math.max(0, r1 * r1 - a * a));
+        const mx = x1 + a * dx / d, my = y1 + a * dy / d;
+        return [
+            { x: mx + h * dy / d, y: my - h * dx / d },
+            { x: mx - h * dy / d, y: my + h * dx / d },
+        ];
+    }
+
+    // ── RTT Wave Animation ──
+    const waveCanvas = $('rtt-wave-canvas');
+    const wctx = waveCanvas.getContext('2d');
+
+    function drawWave() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = waveCanvas.parentElement.getBoundingClientRect();
+        const W = rect.width - 28; // account for padding
+        const H = 60;
+        waveCanvas.width = W * dpr;
+        waveCanvas.height = H * dpr;
+        waveCanvas.style.width = W + 'px';
+        waveCanvas.style.height = H + 'px';
+        wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        wctx.clearRect(0, 0, W, H);
+
+        // Phone icon (left)
+        wctx.fillStyle = '#6b7280';
+        wctx.fillRect(6, H / 2 - 12, 10, 24);
+        wctx.strokeStyle = '#9ca3af';
+        wctx.lineWidth = 1;
+        wctx.strokeRect(6, H / 2 - 12, 10, 24);
+
+        // Router icon (right)
+        wctx.fillStyle = '#6b7280';
+        wctx.beginPath();
+        wctx.arc(W - 14, H / 2, 6, 0, Math.PI * 2);
+        wctx.fill();
+        wctx.fillRect(W - 16, H / 2, 4, 10);
+        // Antenna
+        wctx.strokeStyle = '#9ca3af';
+        wctx.lineWidth = 1.5;
+        wctx.beginPath();
+        wctx.moveTo(W - 14, H / 2 - 6);
+        wctx.lineTo(W - 18, H / 2 - 14);
+        wctx.moveTo(W - 14, H / 2 - 6);
+        wctx.lineTo(W - 10, H / 2 - 14);
+        wctx.stroke();
+
+        const startX = 24;
+        const endX = W - 28;
+        const midY = H / 2;
+
+        // Outgoing wave (phone → router)
+        const t = state.wavePhase;
+        const outX = startX + ((t % 1) * (endX - startX));
+
+        // Draw signal path line
+        wctx.strokeStyle = '#1e2433';
+        wctx.lineWidth = 1;
+        wctx.setLineDash([2, 4]);
+        wctx.beginPath();
+        wctx.moveTo(startX, midY);
+        wctx.lineTo(endX, midY);
+        wctx.stroke();
+        wctx.setLineDash([]);
+
+        // Outgoing pulse
+        const outPhase = t % 2;
+        if (outPhase < 1) {
+            const px = startX + outPhase * (endX - startX);
+            const grad = wctx.createRadialGradient(px, midY - 6, 0, px, midY - 6, 12);
+            grad.addColorStop(0, '#3b82f6');
+            grad.addColorStop(1, '#3b82f600');
+            wctx.fillStyle = grad;
+            wctx.beginPath();
+            wctx.arc(px, midY - 6, 12, 0, Math.PI * 2);
+            wctx.fill();
+
+            // Arrow
+            wctx.fillStyle = '#3b82f6';
+            wctx.font = '10px sans-serif';
+            wctx.fillText('→', px + 4, midY - 3);
+        }
+
+        // Return pulse
+        if (outPhase >= 1) {
+            const returnPhase = outPhase - 1;
+            const px = endX - returnPhase * (endX - startX);
+            const grad = wctx.createRadialGradient(px, midY + 6, 0, px, midY + 6, 12);
+            grad.addColorStop(0, '#22c55e');
+            grad.addColorStop(1, '#22c55e00');
+            wctx.fillStyle = grad;
+            wctx.beginPath();
+            wctx.arc(px, midY + 6, 12, 0, Math.PI * 2);
+            wctx.fill();
+
+            wctx.fillStyle = '#22c55e';
+            wctx.font = '10px sans-serif';
+            wctx.fillText('←', px - 12, midY + 10);
+        }
+
+        // Labels
+        wctx.fillStyle = '#4b5563';
+        wctx.font = '9px monospace';
+        wctx.textAlign = 'left';
+        wctx.fillText('Device', 2, H - 2);
+        wctx.textAlign = 'right';
+        wctx.fillText('AP', W - 4, H - 2);
+        wctx.textAlign = 'center';
+
+        const rtt = state.gatewayRTT?.icmp?.avgMs || state.gatewayRTT?.tcp?.avgMs;
+        if (rtt) {
+            wctx.fillStyle = '#f59e0b';
+            wctx.font = 'bold 9px monospace';
+            wctx.fillText(`RTT: ${rtt.toFixed(3)}ms`, W / 2, H - 2);
+        } else {
+            wctx.fillStyle = '#374151';
+            wctx.font = '9px monospace';
+            wctx.fillText('Measuring RTT...', W / 2, H - 2);
+        }
+        wctx.textAlign = 'left';
+    }
+
+    // Animation loop for RTT wave
+    function animateWave() {
+        state.wavePhase += 0.025;
+        drawWave();
+        requestAnimationFrame(animateWave);
+    }
+    animateWave();
+
+    // ── Canvas Interaction ──
+    canvas.addEventListener('click', (e) => {
+        if (!state.placingMode || !state.selectedAP) return;
+        const rect = canvas.getBoundingClientRect();
+        const [gx, gy] = toGrid(e.clientX - rect.left, e.clientY - rect.top);
+        state.apPositions[state.selectedAP] = { x: gx, y: gy };
+        state.placingMode = false;
+        state.selectedAP = null;
+        $('instructions').style.opacity = '0';
+        recalculate();
+    });
+
+    // Pan: shift+click-drag or right-drag
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 2 || e.button === 1 || (e.button === 0 && e.shiftKey)) {
+            state.dragging = true;
+            state.dragStartX = e.clientX; state.dragStartY = e.clientY;
+            state.camStartX = state.camX; state.camStartY = state.camY;
+            e.preventDefault();
+        }
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (!state.dragging) return;
+        state.camX = state.camStartX - (e.clientX - state.dragStartX) / GRID;
+        state.camY = state.camStartY - (e.clientY - state.dragStartY) / GRID;
+        drawCanvas();
+    });
+    window.addEventListener('mouseup', () => { state.dragging = false; });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // ── WebSocket ──
+    let ws, reconnectTimer;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT = 3;
+
+    function connect() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        try {
+            ws = new WebSocket(`${proto}//${location.host}`);
+        } catch (e) {
+            enterStandaloneMode();
+            return;
+        }
+        ws.onopen = () => {
+            reconnectAttempts = 0;
+            $('status').className = 'connected';
+            $('status-text').textContent = 'Scanning...';
+        };
+        ws.onmessage = (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                if (data.error) { $('status-text').textContent = 'Error: ' + data.error; return; }
+                state.networks = data.networks || [];
+                state.locationAuthorized = data.locationAuthorized || false;
+                state.totalRawNetworks = data.totalRawNetworks || 0;
+                if (data.gatewayRTT) {
+                    state.gatewayRTT = data.gatewayRTT;
+                    updateRTTDisplay();
+                }
+                updateLocationBanner();
+                recalculate();
+            } catch (err) { console.error('Parse error:', err); }
+        };
+        ws.onclose = () => {
+            $('status').className = '';
+            reconnectAttempts++;
+            if (reconnectAttempts <= MAX_RECONNECT) {
+                $('status-text').textContent = `Reconnecting (${reconnectAttempts}/${MAX_RECONNECT})...`;
+                clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(connect, 3000);
+            } else {
+                enterStandaloneMode();
+            }
+        };
+        ws.onerror = () => ws.close();
+    }
+
+    function enterStandaloneMode() {
+        $('status').className = '';
+        $('status-text').textContent = 'GPS Only Mode';
+        $('status').querySelector('.dot').style.background = '#f59e0b';
+        $('rtt-section').style.display = 'none';
+        const banner = $('location-banner');
+        if (banner) banner.style.display = 'none';
+        $('ap-list').innerHTML = `
+            <div style="padding:24px 16px;text-align:center;color:#6b7280;">
+                <div style="font-size:0.85rem;font-weight:600;color:#f59e0b;margin-bottom:8px;">
+                    Standalone Mode
+                </div>
+                <div style="font-size:0.72rem;line-height:1.7;">
+                    No local Wi-Fi scanner connected.<br>
+                    Using browser GPS only.<br><br>
+                    To enable Wi-Fi scanning, run locally:<br>
+                    <code style="background:#1e2433;padding:3px 10px;border-radius:4px;font-size:0.7rem;">npm start</code>
+                </div>
+            </div>
+        `;
+    }
+
+    // ── GPS Anchor System ──
+    // Converts Wi-Fi trilateration (meter offsets) into real GPS coordinates.
+    //
+    // How it works:
+    // 1. Browser Geolocation API gets a lat/lng fix (your "anchor point")
+    // 2. You set that as the origin (0,0) on the map
+    // 3. Wi-Fi trilateration gives position as meter offsets from origin
+    // 4. We convert those offsets to lat/lng using:
+    //    - 1° latitude  = 111,320 meters
+    //    - 1° longitude = 111,320 × cos(latitude) meters
+
+    const METERS_PER_DEG_LAT = 111320;
+
+    function metersPerDegLng(lat) {
+        return 111320 * Math.cos(lat * Math.PI / 180);
+    }
+
+    // Convert meter offset from anchor to GPS coords
+    function offsetToGPS(anchor, dx, dy) {
+        // dx = east/west meters (positive = east), dy = north/south meters (positive = north on map, but our Y is inverted)
+        const dLat = -dy / METERS_PER_DEG_LAT;  // negative because screen Y increases downward
+        const dLng = dx / metersPerDegLng(anchor.lat);
+        return {
+            lat: anchor.lat + dLat,
+            lng: anchor.lng + dLng,
+        };
+    }
+
+    function formatGPS(lat, lng, precision = 10) {
+        // 64-bit double gives ~15 significant digits
+        // 6 decimal places = ~0.11m precision
+        // 8 decimal places = ~1.1mm precision
+        // 10 decimal places = ~0.011mm precision (full 64-bit)
+        const latDir = lat >= 0 ? 'N' : 'S';
+        const lngDir = lng >= 0 ? 'E' : 'W';
+        return `${Math.abs(lat).toFixed(precision)}°${latDir}, ${Math.abs(lng).toFixed(precision)}°${lngDir}`;
+    }
+
+    function formatDMS(deg) {
+        const d = Math.floor(Math.abs(deg));
+        const m = Math.floor((Math.abs(deg) - d) * 60);
+        const s = ((Math.abs(deg) - d - m / 60) * 3600).toFixed(2);
+        return `${d}°${m}'${s}"`;
+    }
+
+    function formatGPSDMS(lat, lng) {
+        const latDir = lat >= 0 ? 'N' : 'S';
+        const lngDir = lng >= 0 ? 'E' : 'W';
+        return `${formatDMS(lat)}${latDir} ${formatDMS(lng)}${lngDir}`;
+    }
+
+    // Start watching browser GPS
+    function startBrowserGPS() {
+        if (!navigator.geolocation) {
+            $('hud-anchor').textContent = 'Geolocation not available';
+            return;
+        }
+
+        state.gpsWatchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                state.browserGPS = {
+                    lat: pos.coords.latitude,
+                    lng: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy,
+                    altitude: pos.coords.altitude,
+                    timestamp: pos.timestamp,
+                };
+                updateGPSDisplay();
+            },
+            (err) => {
+                $('hud-anchor').textContent = 'GPS: ' + err.message;
+                $('hud-anchor').style.fontSize = '0.65rem';
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+        );
+    }
+
+    function setGPSAnchor() {
+        if (!state.browserGPS) {
+            $('hud-anchor').textContent = 'No GPS fix yet — waiting...';
+            return;
+        }
+        state.gpsAnchor = { ...state.browserGPS };
+        $('hud-anchor').textContent = formatGPS(state.gpsAnchor.lat, state.gpsAnchor.lng);
+        $('hud-anchor-acc').textContent =
+            `Anchor set (±${state.gpsAnchor.accuracy.toFixed(0)}m) — grid origin = this GPS point`;
+        updateGPSDisplay();
+        recalculate();
+    }
+
+    function updateGPSDisplay() {
+        if (!state.browserGPS) return;
+
+        // Show current browser GPS in anchor card if no anchor set yet
+        if (!state.gpsAnchor) {
+            $('hud-anchor').textContent = formatGPS(state.browserGPS.lat, state.browserGPS.lng, 8);
+            $('hud-anchor-acc').textContent =
+                `Live GPS (±${state.browserGPS.accuracy.toFixed(1)}m) — click "Set GPS Anchor" to lock as origin`;
+        }
+
+        // If we have both anchor + trilateration, show Wi-Fi GPS estimate
+        if (state.gpsAnchor && state.estimatedPos) {
+            const scale = getGridScale();
+            const dx = state.estimatedPos.x * scale;
+            const dy = state.estimatedPos.y * scale;
+            const gps = offsetToGPS(state.gpsAnchor, dx, dy);
+
+            // Full 64-bit precision (10 decimal places = 0.011mm)
+            $('hud-gps').textContent = formatGPS(gps.lat, gps.lng, 10);
+            $('hud-gps').style.color = '#22c55e';
+
+            // Share with map page via localStorage
+            try { localStorage.setItem('wifiEstimate', JSON.stringify({
+                lat: gps.lat, lng: gps.lng, accuracy: combined, timestamp: Date.now()
+            })); } catch(e) {}
+
+            // Combined accuracy: anchor GPS error + Wi-Fi trilateration error
+            const anchorAcc = state.gpsAnchor.accuracy;
+            const wifiAcc = state.residual;
+            const combined = Math.sqrt(anchorAcc ** 2 + wifiAcc ** 2);
+            const ci95 = state.confidence95 || wifiAcc * 1.96;
+
+            $('hud-gps-sub').innerHTML =
+                `Anchor: ±${anchorAcc.toFixed(1)}m | Wi-Fi: ±${wifiAcc.toFixed(2)}m | ` +
+                `<strong style="color:#22c55e">Combined: ±${combined.toFixed(2)}m</strong> | ` +
+                `95% CI: ±${Math.sqrt(anchorAcc**2 + ci95**2).toFixed(2)}m<br>` +
+                `DMS: ${formatGPSDMS(gps.lat, gps.lng)} | ` +
+                `Decimal: ${gps.lat.toFixed(14)}, ${gps.lng.toFixed(14)}`;
+        } else if (state.browserGPS) {
+            $('hud-gps').textContent = formatGPS(state.browserGPS.lat, state.browserGPS.lng, 8);
+            $('hud-gps').style.color = '#f59e0b';
+            $('hud-gps-sub').textContent = state.gpsAnchor
+                ? 'Place 3+ APs for Wi-Fi refinement'
+                : `Browser-only (±${state.browserGPS.accuracy.toFixed(1)}m) — set anchor first`;
+        }
+    }
+
+    // Anchor button
+    $('anchor-btn').addEventListener('click', setGPSAnchor);
+
+    // ── Init ──
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+    connect();
+    startBrowserGPS();
+})();
+</script>
+</body>
+</html>
